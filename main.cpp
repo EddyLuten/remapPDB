@@ -30,6 +30,42 @@ ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <Windows.h>
 #include <DbgHelp.h>
 
+static bool filenamesMatch(const WCHAR* _modulePath, const char* _executablePath)
+{
+	const WCHAR* moduleFilename;
+	const char*  executableFilename;
+
+	if (NULL == (moduleFilename = wcsrchr(_modulePath, L'\\')) &&
+		NULL == (moduleFilename = wcsrchr(_modulePath, L'/')))
+	{
+		moduleFilename = _modulePath;
+	}
+	else if (moduleFilename != _modulePath)
+	{
+		++moduleFilename;
+	}
+
+	if (NULL == (executableFilename = strrchr(_executablePath, '\\')) &&
+		NULL == (executableFilename = strrchr(_executablePath, '/')))
+	{
+		executableFilename = _executablePath;
+	}
+	else if (executableFilename != _executablePath)
+	{
+		++executableFilename;
+	}
+
+	while (L'\0' != *moduleFilename && '\0' != *executableFilename)
+	{
+		if (*moduleFilename != (wchar_t)*executableFilename)
+			return false;
+
+		++moduleFilename;
+		++executableFilename;
+	}
+
+	return true;
+}
 
 static bool getExecutableChecksumAndSize( const char* _path, ULONG32* _timeStamp, IMAGE_OPTIONAL_HEADER* _header )
 {
@@ -96,11 +132,20 @@ static bool fixupDump( const char* _dumpPath, ULONG32 _timeStamp, const IMAGE_OP
 		{
 			MINIDUMP_MODULE_LIST* moduleList = (MINIDUMP_MODULE_LIST*)(data + directory[ii].Location.Rva);
 
-			MINIDUMP_MODULE* module = &moduleList->Modules[0];
-			module->ModuleNameRva = fileSize;
-			module->CheckSum = _header->CheckSum;
-			module->SizeOfImage = _header->SizeOfImage;
-			module->TimeDateStamp = _timeStamp;
+			for (int jj = 0; jj < (int)moduleList->NumberOfModules; ++jj)
+			{
+				MINIDUMP_MODULE* module = &moduleList->Modules[jj];
+				MINIDUMP_STRING* moduleFilename =
+					(MINIDUMP_STRING*)(data + module->ModuleNameRva);
+
+				if (filenamesMatch(moduleFilename->Buffer, _executablePath))
+				{
+					module->ModuleNameRva = fileSize;
+					module->CheckSum = _header->CheckSum;
+					module->SizeOfImage = _header->SizeOfImage;
+					module->TimeDateStamp = _timeStamp;
+				}
+			}
 		}
 	}
 
